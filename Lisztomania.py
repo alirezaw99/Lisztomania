@@ -8,45 +8,53 @@ from telegram.ext import   (
     filters,
 )
 import logging
+
+
 #Enable logging
 logging.basicConfig(format= "%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO) 
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-GENDER , PHOTO, LOCATION, BIO = range(4)
+
+AUDIO = 0
+
+
 #Define Command Handlers
 async def start(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
     reply_keyboard = [['Boy', 'Girl', 'Other']]
     
-    await update.message.reply_text("Hi! My name is Professor Bot. I will hold a conversation with you. "
-        "Send /cancel to stop talking to me.\n\n"
-        "Are you a boy or a girl?", 
-        reply_markup = ReplyKeyboardMarkup(
-            reply_keyboard, one_time_keyboard=True, input_field_placeholder='Boy or Girl ?'
-        ))
-    return GENDER
+    await update.message.reply_text("Hi! My name is Lisztomania Bot. I will Convert Audio files to Voice for you. "
+        "Please send your Audio file : \n\n"
+        "Send /cancel to cancel the operation"
+    )
+        
+    return AUDIO
+
+'''
 async def gender(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
     user = update.message.from_user
     logger.info(f'{user.first_name} is {update.message.text}')
     
     await update.message.reply_text('Got it!, Now send me Your Photo so i see what you look like'
                                     , reply_markup=ReplyKeyboardRemove())
-    
-    
-    
+        
     return PHOTO
-   
-async def photo(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
+'''   
+
+async def audio(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
     user = update.message.from_user
-    photo_file = await update.message.photo[-1].get_file()
-    await photo_file.download_to_drive('user_photo.jpg')
-    logger.info(f'Photo of user {user.first_name} --> {photo_file.file_id} in {photo_file.file_path}')
-    await update.message.reply_text('Gorgeous!')
+    audio_file = await update.message.audio.get_file()
+    await audio_file.download_to_drive('user_audio.mp3')
+    logger.info(f'Audio of user {user.first_name} is downloaded to drive')
+    await update.message.reply_text('Audio Recieved!')
     
     return ConversationHandler.END
+
+
 async def cancel(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
     user = update.message.from_user
     logging.info(f'{user.first_name} cancelled conversation')
-    await update.message.reply_text('Bye!', reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text('Bye!')
+    
     return ConversationHandler.END
         
  
@@ -58,9 +66,8 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            GENDER: [MessageHandler(filters.Regex("^(Boy|Girl|Other)$"), gender)],
-            PHOTO: [MessageHandler(filters.PHOTO    , photo)]
-        }, fallbacks=[CommandHandler('cancel', cancel)]            
+            AUDIO: [MessageHandler(filters.AUDIO, audio)]
+        }, fallbacks=[CommandHandler('cancel', cancel)]             
     )
     app.add_handler(conv_handler)
     
