@@ -8,7 +8,7 @@ from telegram.ext import   (
     filters,
 )
 import logging
-
+from pydub import AudioSegment 
 
 #Enable logging
 logging.basicConfig(format= "%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO) 
@@ -20,8 +20,7 @@ AUDIO = 0
 
 #Define Command Handlers
 async def start(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
-    reply_keyboard = [['Boy', 'Girl', 'Other']]
-    
+
     await update.message.reply_text("Hi! My name is Lisztomania Bot. I will Convert Audio files to Voice for you. "
         "Please send your Audio file : \n\n"
         "Send /cancel to cancel the operation"
@@ -29,23 +28,17 @@ async def start(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
         
     return AUDIO
 
-'''
-async def gender(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
-    user = update.message.from_user
-    logger.info(f'{user.first_name} is {update.message.text}')
-    
-    await update.message.reply_text('Got it!, Now send me Your Photo so i see what you look like'
-                                    , reply_markup=ReplyKeyboardRemove())
-        
-    return PHOTO
-'''   
 
 async def audio(update : Update, context : ContextTypes.DEFAULT_TYPE) -> int :
     user = update.message.from_user
     audio_file = await update.message.audio.get_file()
     await audio_file.download_to_drive('user_audio.mp3')
     logger.info(f'Audio of user {user.first_name} is downloaded to drive')
-    await update.message.reply_text('Audio Recieved!')
+    
+    song = AudioSegment.from_file('./user_audio.mp3')
+    song.export('user_audio.ogg', format='ogg')
+    
+    await update.message.reply_voice('./user_audio.ogg')
     
     return ConversationHandler.END
 
