@@ -3,6 +3,9 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 import ffmpeg
 import os
 import re
+import mutagen
+from mutagen.easyid3 import EasyID3
+
 
 # Global variables to track user state
 user_states = {}
@@ -11,6 +14,8 @@ user_states = {}
 STATE_IDLE = "idle"
 STATE_ASK_DEMO_LENGTH = "ask_demo_length"
 STATE_ASK_START_POINT = "ask_start_point"
+STATE_EDIT_METADATA = "edit_metadata"
+
 
 # Menu to show options for the uploaded file
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -33,6 +38,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Give me the demo", callback_data="demo")],
         [InlineKeyboardButton("Change Caption", callback_data="caption")],
+        [InlineKeyboardButton("Change File INFO", callback_data="change_metadata")],
         [InlineKeyboardButton("Cancel", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -43,6 +49,14 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     await query.answer()
+    
+    if query.message is None:
+        # If there's no message to edit, send a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Unknown option selected. Please try again."
+        )
+        return
 
     if user_id not in user_states:
         await query.edit_message_text("Please send an audio file first.")
@@ -80,13 +94,44 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_states.pop(user_id, None)  # Clear user state
             except Exception as e:
                 await query.edit_message_text(f"An error occurred while sending the file: {e}")
+        
+        case "change_metadata":
+            user_states[user_id]["state"] = STATE_EDIT_METADATA
+            input_file_id = user_states[user_id]["file_id"]
 
+            # New keyboard for metadata options
+            metadata_keyboard = [
+                [InlineKeyboardButton("Change File Name", callback_data="change_filename")],
+                [InlineKeyboardButton("Change Song Title", callback_data="change_title")],
+                [InlineKeyboardButton("Change Artist Name", callback_data="change_artist")],
+                [InlineKeyboardButton("Change Album Name", callback_data="change_album")],
+                [InlineKeyboardButton("Change Genre", callback_data="change_genre")],
+                [InlineKeyboardButton("Back to Main Menu", callback_data="main_menu")],
+            ]
+            reply_markup = InlineKeyboardMarkup(metadata_keyboard)
+
+            try:
+                await context.bot.send_audio(
+                    chat_id=query.message.chat_id,
+                    audio=input_file_id,
+                    caption="What metadata do you want to change?",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                await query.edit_message_text(f"An error occurred: {e}")
+                
         case "cancel":
             user_states.pop(user_id, None)
             await query.edit_message_text("Operation cancelled.")
 
         case _:
-            await query.edit_message_text("Unknown option selected.")
+            try:
+                await query.edit_message_text("Unknown option selected.")
+            except telegram.error.BadRequest:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="Unknown option selected. Please try again."
+                )
 
 
 # Handle user replies for demo length and start point
@@ -175,7 +220,107 @@ async def create_and_send_demo(update: Update, context: ContextTypes.DEFAULT_TYP
         # Clean up input file if an error occurs
         if os.path.exists(input_path):
             os.remove(input_path)
-            
+
+async def handle_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    await query.answer()
+
+    if user_id not in user_states or user_states[user_id]["state"] != STATE_EDIT_METADATA:
+        await query.edit_message_text("Please send an audio file first.")
+        return
+
+    input_file_id = user_states[user_id]["file_id"]
+    file_name = user_states[user_id]["file_name"]
+
+    match query.data:
+        case "change_filename":
+            user_states[user_id]["state"] = "waiting_for_filename"
+            await query.edit_message_text("Enter the new file name (without extension):")
+
+        case "change_title":
+            user_states[user_id]["state"] = "waiting_for_title"
+            await query.edit_message_text("Enter the new song title:")
+
+        case "change_artist":
+            user_states[user_id]["state"] = "waiting_for_artist"
+            await query.edit_message_text("Enter the new artist name:")
+
+        case "change_album":
+            user_states[user_id]["state"] = "waiting_for_album"
+            await query.edit_message_text("Enter the new album name:")
+
+        case "change_genre":
+            user_states[user_id]["state"] = "waiting_for_genre"
+            await query.edit_message_text("Enter the new genre:")
+
+        case "main_menu":
+            # Return to the main menu
+            user_states[user_id]["state"] = STATE_IDLE
+            await query.edit_message_text("Returning to the main menu. Select an option:")
+
+async def handle_metadata_changes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if user_id not in user_states:
+        await update.message.reply_text("Please send an audio file first.")
+        return
+
+    user_state = user_states[user_id]
+    input_file_id = user_state["file_id"]
+    file_name = user_state["file_name"]
+
+    try:
+        if user_state["state"] == "waiting_for_filename":
+            new_file_name = update.message.text + ".mp3"
+            os.rename(file_name, new_file_name)
+            user_state["file_name"] = new_file_name
+            await update.message.reply_text(f"File name changed to {new_file_name}.")
+
+        elif user_state["state"] == "waiting_for_title":
+            audio = EasyID3(file_name)
+            audio["title"] = update.message.text
+            audio.save()
+            await update.message.reply_text("Song title updated.")
+
+        elif user_state["state"] == "waiting_for_artist":
+            audio = EasyID3(file_name)
+            audio["artist"] = update.message.text
+            audio.save()
+            await update.message.reply_text("Artist name updated.")
+
+        elif user_state["state"] == "waiting_for_album":
+            audio = EasyID3(file_name)
+            audio["album"] = update.message.text
+            audio.save()
+            await update.message.reply_text("Album name updated.")
+
+        elif user_state["state"] == "waiting_for_genre":
+            audio = EasyID3(file_name)
+            audio["genre"] = update.message.text
+            audio.save()
+            await update.message.reply_text("Genre updated.")
+
+        # Keep the metadata keyboard open
+        metadata_keyboard = [
+            [InlineKeyboardButton("Change File Name", callback_data="change_filename")],
+            [InlineKeyboardButton("Change Song Title", callback_data="change_title")],
+            [InlineKeyboardButton("Change Artist Name", callback_data="change_artist")],
+            [InlineKeyboardButton("Change Album Name", callback_data="change_album")],
+            [InlineKeyboardButton("Change Genre", callback_data="change_genre")],
+            [InlineKeyboardButton("Back to Main Menu", callback_data="main_menu")],
+        ]
+        reply_markup = InlineKeyboardMarkup(metadata_keyboard)
+
+        await context.bot.send_audio(
+            chat_id=update.message.chat_id,
+            audio=input_file_id,
+            caption="What else do you want to change?",
+            reply_markup=reply_markup
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+                  
 #Replys to /start command
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f'Hello {update.effective_user.first_name} Wellcome to Lisztomania Music Editor BOT! \nSend me any Music File to Edit and get Demos.')

@@ -24,6 +24,7 @@ imutils==0.5.4
 ipython==8.14.0
 jedi==0.18.2
 matplotlib-inline==0.1.6
+mutagen==1.47.0
 nodejs==0.1.1
 numpy==1.24.3
 opencv-python==4.8.0.76
