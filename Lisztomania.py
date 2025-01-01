@@ -3,8 +3,9 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 import ffmpeg
 import os
 import re
-import mutagen
+from mutagen import File
 from mutagen.easyid3 import EasyID3
+import telegram
 
 
 # Global variables to track user state
@@ -29,7 +30,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = {
         "state": STATE_IDLE,
         "file_id": input_file.file_id,
-        "file_name": f"{input_file.file_id}.mp3",
+        "file_name": f"{input_file.file_name}.mp3",
         "demo_length": None,
         "start_point": None,
     }
@@ -47,6 +48,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Handle menu selection
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    print(f"handle_menu received: {query.data}")
     user_id = query.from_user.id
     await query.answer()
     
@@ -56,6 +58,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=query.message.chat_id,
             text="Unknown option selected. Please try again."
         )
+        print('we got an error')
         return
 
     if user_id not in user_states:
@@ -127,12 +130,14 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case _:
             try:
                 await query.edit_message_text("Unknown option selected.")
+                print('another error')
             except telegram.error.BadRequest:
                 await context.bot.send_message(
                     chat_id=query.message.chat_id,
                     text="Unknown option selected. Please try again."
                 )
-
+                print('errrorrrr')
+                print(user_states[user_id]["state"])
 
 # Handle user replies for demo length and start point
 async def handle_user_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,9 +216,9 @@ async def create_and_send_demo(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_voice(voice=voice_file, caption="Here’s your voice demo!")
 
         # Clean up files
-        os.remove(input_path)
-        os.remove(output_path)
-        user_states.pop(update.message.from_user.id, None)
+        # os.remove(input_path)
+        # os.remove(output_path)
+        # user_states.pop(update.message.from_user.id, None)
 
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
@@ -223,11 +228,12 @@ async def create_and_send_demo(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    print(f"handle_metadata received: {query.data}")
     user_id = query.from_user.id
     await query.answer()
 
     if user_id not in user_states or user_states[user_id]["state"] != STATE_EDIT_METADATA:
-        await query.edit_message_text("Please send an audio file first.")
+        await query.edit_message_text("Please send an audio file first!!!!!!!!!!!!!!!!!!!")
         return
 
     input_file_id = user_states[user_id]["file_id"]
@@ -236,30 +242,33 @@ async def handle_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE):
     match query.data:
         case "change_filename":
             user_states[user_id]["state"] = "waiting_for_filename"
-            await query.edit_message_text("Enter the new file name (without extension):")
+            user_state = user_states[user_id]["state"]
+            print(f"user state is :{user_state}")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Enter the new file name (without extension):")
 
         case "change_title":
             user_states[user_id]["state"] = "waiting_for_title"
-            await query.edit_message_text("Enter the new song title:")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Enter the new song title:")
 
         case "change_artist":
             user_states[user_id]["state"] = "waiting_for_artist"
-            await query.edit_message_text("Enter the new artist name:")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Enter the new artist name:")
 
         case "change_album":
             user_states[user_id]["state"] = "waiting_for_album"
-            await query.edit_message_text("Enter the new album name:")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Enter the new album name:")
 
         case "change_genre":
             user_states[user_id]["state"] = "waiting_for_genre"
-            await query.edit_message_text("Enter the new genre:")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Enter the new genre:")
 
         case "main_menu":
             # Return to the main menu
             user_states[user_id]["state"] = STATE_IDLE
-            await query.edit_message_text("Returning to the main menu. Select an option:")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Returning to the main menu. Select an option:")
 
 async def handle_metadata_changes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f"handle_metadata_changes triggered for user {update.message.from_user.id}")
     user_id = update.message.from_user.id
     if user_id not in user_states:
         await update.message.reply_text("Please send an audio file first.")
@@ -268,55 +277,55 @@ async def handle_metadata_changes(update: Update, context: ContextTypes.DEFAULT_
     user_state = user_states[user_id]
     input_file_id = user_state["file_id"]
     file_name = user_state["file_name"]
+    
+    # Download the file
+    file = await context.bot.get_file(input_file_id)
+    await file.download_to_drive(file_name)
 
     try:
         if user_state["state"] == "waiting_for_filename":
-            new_file_name = update.message.text + ".mp3"
+            print(f"State updated to waiting_for_filename for user {user_id}")
+
+            # Handle renaming and preserve the extension
+            user_input = update.message.text.strip()
+            base_name, ext = os.path.splitext(file_name)
+            new_file_name = f"{user_input}{ext}"  # Preserve original extension
+            
             os.rename(file_name, new_file_name)
             user_state["file_name"] = new_file_name
+
+            # Send the renamed file back
+            with open(new_file_name, "rb") as audio_file:
+                await update.message.reply_audio(audio=audio_file)
             await update.message.reply_text(f"File name changed to {new_file_name}.")
 
-        elif user_state["state"] == "waiting_for_title":
-            audio = EasyID3(file_name)
-            audio["title"] = update.message.text
+        else:
+            # Handle metadata changes for title, artist, album, genre, etc.
+            audio = File(file_name, easy=True)
+            if audio is None:
+                await update.message.reply_text("Unsupported file format.")
+                return
+
+            user_input = update.message.text.strip()
+            if user_state["state"] == "waiting_for_title":
+                audio["title"] = user_input
+                await update.message.reply_text("Song title updated.")
+            elif user_state["state"] == "waiting_for_artist":
+                audio["artist"] = user_input
+                await update.message.reply_text("Artist name updated.")
+            elif user_state["state"] == "waiting_for_album":
+                audio["album"] = user_input
+                await update.message.reply_text("Album name updated.")
+            elif user_state["state"] == "waiting_for_genre":
+                audio["genre"] = user_input
+                await update.message.reply_text("Genre updated.")
+            
+            # Save metadata changes
             audio.save()
-            await update.message.reply_text("Song title updated.")
 
-        elif user_state["state"] == "waiting_for_artist":
-            audio = EasyID3(file_name)
-            audio["artist"] = update.message.text
-            audio.save()
-            await update.message.reply_text("Artist name updated.")
-
-        elif user_state["state"] == "waiting_for_album":
-            audio = EasyID3(file_name)
-            audio["album"] = update.message.text
-            audio.save()
-            await update.message.reply_text("Album name updated.")
-
-        elif user_state["state"] == "waiting_for_genre":
-            audio = EasyID3(file_name)
-            audio["genre"] = update.message.text
-            audio.save()
-            await update.message.reply_text("Genre updated.")
-
-        # Keep the metadata keyboard open
-        metadata_keyboard = [
-            [InlineKeyboardButton("Change File Name", callback_data="change_filename")],
-            [InlineKeyboardButton("Change Song Title", callback_data="change_title")],
-            [InlineKeyboardButton("Change Artist Name", callback_data="change_artist")],
-            [InlineKeyboardButton("Change Album Name", callback_data="change_album")],
-            [InlineKeyboardButton("Change Genre", callback_data="change_genre")],
-            [InlineKeyboardButton("Back to Main Menu", callback_data="main_menu")],
-        ]
-        reply_markup = InlineKeyboardMarkup(metadata_keyboard)
-
-        await context.bot.send_audio(
-            chat_id=update.message.chat_id,
-            audio=input_file_id,
-            caption="What else do you want to change?",
-            reply_markup=reply_markup
-        )
+            # Send the file back after updating metadata
+            with open(file_name, "rb") as audio_file:
+                await update.message.reply_document(document=audio_file)
 
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
@@ -332,8 +341,12 @@ def main():
     # Handlers
     app.add_handler(CommandHandler('start',start_handler))
     app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE, handle_audio))
-    app.add_handler(CallbackQueryHandler(handle_menu))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_reply))
+    app.add_handler(CallbackQueryHandler(handle_menu, pattern="^(change_metadata|demo|caption|change_caption|remove_caption|cancel)$"))
+    app.add_handler(CallbackQueryHandler(handle_metadata, pattern="^(change_filename|change_title|change_artist|change_album|change_genre|main_menu)$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_metadata_changes), group=1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_reply), group=2)
+
+
 
     print("Bot is running...")
     app.run_polling()
