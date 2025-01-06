@@ -4,7 +4,6 @@ import ffmpeg
 import os
 import re
 from mutagen import File
-from mutagen.easyid3 import EasyID3
 import telegram
 
 
@@ -236,8 +235,6 @@ async def handle_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Please send an audio file first!!!!!!!!!!!!!!!!!!!")
         return
 
-    input_file_id = user_states[user_id]["file_id"]
-    file_name = user_states[user_id]["file_name"]
 
     match query.data:
         case "change_filename":
@@ -276,7 +273,7 @@ async def handle_metadata_changes(update: Update, context: ContextTypes.DEFAULT_
 
     user_state = user_states[user_id]
     input_file_id = user_state["file_id"]
-    file_name = user_state["file_name"]
+    file_name = user_state["file_name"][:-4]
     
     # Download the file
     file = await context.bot.get_file(input_file_id)
@@ -297,8 +294,12 @@ async def handle_metadata_changes(update: Update, context: ContextTypes.DEFAULT_
             # Send the renamed file back
             with open(new_file_name, "rb") as audio_file:
                 await update.message.reply_audio(audio=audio_file)
-            await update.message.reply_text(f"File name changed to {new_file_name}.")
-
+                await update.message.reply_text(f"File name changed to {new_file_name}.")
+            
+            print(new_file_name)
+            os.remove(new_file_name)
+            user_states.pop(update.message.from_user.id, None)
+            
         else:
             # Handle metadata changes for title, artist, album, genre, etc.
             audio = File(file_name, easy=True)
@@ -325,10 +326,15 @@ async def handle_metadata_changes(update: Update, context: ContextTypes.DEFAULT_
 
             # Send the file back after updating metadata
             with open(file_name, "rb") as audio_file:
-                await update.message.reply_document(document=audio_file)
+                os.remove(file_name)
+                await update.message.reply_audio(audio=audio_file)
+                print(file_name)
+                
+            os.remove(file_name)
+            user_states.pop(update.message.from_user.id, None)
 
     except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
+        print(f"An error occurred: {e}")
                   
 #Replys to /start command
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
